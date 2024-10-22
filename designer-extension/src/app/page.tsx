@@ -1,7 +1,12 @@
 "use client";
 import { motion } from "framer-motion"; // For animations
+import { list } from "postcss";
 import React, { useEffect, useState } from "react";
 // import Image from "next/image";
+import { createHmac } from 'node:crypto';
+import { validateHeaderValue } from "node:http";
+import { devNull } from "node:os";
+import { any } from "webflow-api/core/schemas";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL;
 
@@ -9,25 +14,18 @@ interface Site {
   id: string;
 }
 
+interface Elements {
+  elements: string;
+}
+
 interface Image {
   url: string;
 }
 
 interface UserInputProps {
+  selectedSite: any;
   setImages: any;
   setPage: any;
-  token: string;
-}
-
-interface SelectedImage {
-  index: number;
-  url: string;
-}
-
-interface ImageOptionsProps {
-  images: Image[];
-  resetUserInput: () => void;
-  selectedSite: Site | null;
   token: string;
 }
 
@@ -37,30 +35,46 @@ interface LoginProps {
   setToken: any;
 }
 
+interface StringIndexedObject {
+  [key: string]: string;
+}
+
 const MainPage: React.FC = () => {
   const [page, setPage] = useState(0);
   const [token, setToken] = useState<string>("");
   const [selectedSite, setSelectedSite] = useState<Site | null>(null);
+  // const [elements, setElements] = useState<Elements | null>(null);
   const [images, setImages] = useState<Image[]>([]);
   const [mounted, setMounted] = React.useState(false);
+
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
   useEffect(() => {
+
     if (typeof window !== "undefined") {
       // Get authorization, if already authorized then set setPage to 1
       const auth = localStorage.getItem("devflow_token");
 
       const getSiteInfo = async () => {
         const siteInfo = await webflow.getSiteInfo();
-        const siteId = siteInfo.siteId;
-        setSelectedSite({ id: siteId });
+        console.log("siteInfo:\n", siteInfo);
+        console.log("siteInfo?.siteId:\n", siteInfo?.siteId);
+        const siteId = siteInfo?.siteId;
+        setSelectedSite({ id: siteInfo?.siteId });
+        console.log("XX selectedSite:\n", selectedSite);
       };
+
+      // const extractElementDetails = (elementArray: AnyElement[] | null, p0: never[]) => {
+      //   return elementArray?.map((e) => {return ({element: e, id: e.id, hasChildren: e.children, type: e.type, domId: e.domId ? e.getDomId() : null, children: (e.children ? (e.getChildren() ? () => extractElementDetails(e.getChildren(),[]) : null) : null)})});
+      // };
+
       setPage(auth ? 1 : 0);
       setToken(auth || "");
       getSiteInfo();
+      // getSiteElements();
     }
   }, []);
 
@@ -79,19 +93,7 @@ const MainPage: React.FC = () => {
       return <Login setPage={setPage} token={token} setToken={setToken} />;
     case 1:
       return (
-        <UserInput setImages={setImages} setPage={setPage} token={token} />
-      );
-    case 3:
-      return (
-        <ImageOptions
-          images={images}
-          resetUserInput={() => {
-            setImages([]);
-            setPage(2);
-          }}
-          selectedSite={selectedSite}
-          token={token}
-        />
+        <UserInput selectedSite={selectedSite} setImages={setImages} token={token} setPage={setPage} />
       );
   }
 };
@@ -115,7 +117,7 @@ const Login: React.FC<LoginProps> = ({
       <div className="text-center space-y-8">
         <div>
           <h1 className="mt-3 text-4xl font-bold text-gray-200 mb-2">
-            Image Generator
+            Site Build Helper App
           </h1>
           <h2 className="mt-3 text-lg text-gray-400 mb-2">by Devflow.party</h2>
           <div className="mt-8 space-y-6">
@@ -144,41 +146,333 @@ const Login: React.FC<LoginProps> = ({
   );
 };
 
-const UserInput: React.FC<UserInputProps> = ({ setImages, token, setPage }) => {
-  const [prompt, setPrompt] = useState<string>("");
-  const [size, setSize] = useState<number>(256);
+const UserInput: React.FC<UserInputProps> = ({ selectedSite, setImages, token, setPage }) => {
+  // const [selectedSite, setSelectedSite] = useState<Site | null>(null);
+
   const [n, setN] = useState<number>(1);
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
-  const generateImages = async () => {
+  const [newPageName, setNewPageName] = useState<string>("");
+  const [fontFamily, setFontFamily] = useState<string>("");
+  
+  const [allCollxns, setAllCollxns] = useState<any>([]);
+  const [mainTempCollxnID, setMainTempCollxnID] = useState<string>("");
+  const [programsCollxnID, setProgramsCollxnID] = useState<string>("");
+  const [growEntriesCollxnID, setGrowEntriesCollxnID] = useState<string>("");
+  const [faqsCollxnID, setFaqsCollxnID] = useState<string>("");
+
+  const [cmsUpdatesList, setCmsUpdatesList] = useState<any>([]);
+  const [varUpdatesList, setVarUpdatesList] = useState<any>([]);
+
+  const [ppSubdomainInput, setPpSubdomainInputValue] = useState<string>("");
+  const [mainCTALinkInput, setMainCTALinkInputValue] = useState<string>("");
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      // Get authorization, if already authorized then set setPage to 1
+      const auth = localStorage.getItem("devflow_token");
+      setPage(auth ? 1 : 0);
+      // setToken(auth || "");
+
+    }
+  }, []);
+
+
+  const updateVariables = async (variables: any[]) => {
+
+    console.log("UPDATING VARIABLES:");
+    console.log(variables);
+    console.log(JSON.stringify(variables));
+
+    const collection = await webflow.getDefaultVariableCollection();
+
+    for (const variable of variables) {
+      const varName = variable?.name;
+      const varVal = variable?.value;
+
+      const siteVariable = await collection?.getVariableByName(varName);
+      if (siteVariable) {
+        siteVariable?.set(varVal);
+      }
+
+    }
+
+  };
+
+  const changeFont = async () => {
+    console.log("CREATING PAGE W NAME: " + fontFamily);
+
+    const collection = await webflow.getDefaultVariableCollection();
+    const fontFamilyVariable = await collection?.getVariableByName("font-family");
+    if (fontFamilyVariable?.type === "FontFamily") {
+      fontFamilyVariable?.set(fontFamily);
+    }
+  };
+
+  const createPage = async () => {
+    console.log("CREATING PAGE W NAME: " + newPageName);
+    // Create new page and set page name
+    const newPage = await webflow.createPage() as Page;
+    newPage.setName(newPageName);
+    newPage.setTitle(newPageName);
+    // Switch to new page
+    await webflow.switchPage(newPage);
+  };
+
+  const getPages = async () => {
+    console.log("GETTING PAGES");
+    const pages = await webflow.getAllPagesAndFolders();
+    console.log(pages);
+    console.log(JSON.stringify(pages));
+    
+    for (const page of pages) {
+      if (page.type === "Page") {
+        const pageName = await page.getName().then(d => {return d;});
+        if (pageName.includes("Locations Template")) {
+          await webflow.switchPage(page);
+          const currentPage = await webflow.getCurrentPage();
+          const currentPageName = await currentPage?.getName()
+          // Print page details
+          console.log("Current Page:");
+          console.log(currentPage, currentPageName);
+
+          let amenitiesComp;
+          const allComponents = await webflow.getAllComponents();
+          for (const component of allComponents) {
+            const compName = await component.getName();
+            if (compName === "Amenities") {
+              amenitiesComp = component;
+            }
+          }
+          const rootEl = await webflow.getRootElement();
+
+          if (amenitiesComp && rootEl?.children){
+            const children = await rootEl.getChildren();
+            await children[0].before(amenitiesComp);
+
+            // await rootEl?.after(amenitiesComp);
+          }
+          
+
+          // const rootEl = await webflow.getRootElement();
+          
+        }
+      }
+      
+    }
+
+  };
+
+  const changeHeadingOne = async (textValue: string) => {
+    // let mainHeadElement;
+    const allElements = await webflow.getAllElements();
+
+    const benefitsHeaderOne = allElements?.filter(e => e.type?.includes("Heading") && (e?.domId && e.getDomId().then(did => did && did === "cpnt-bfts-hdr-1")));
+    const benefitsHeaderOneEl = benefitsHeaderOne && benefitsHeaderOne[0];
+    console.log("benefitsHeaderOneEl:");
+    console.log(JSON.stringify(benefitsHeaderOneEl));
+
+    if (benefitsHeaderOneEl && benefitsHeaderOneEl.textContent){
+      benefitsHeaderOneEl.setTextContent(textValue);
+    }
+  };
+
+  const updateCMSVals = async () => {
     setIsLoading(true);
-    const params = new URLSearchParams({
-      auth: token,
-      prompt: prompt,
-      n: n.toString(),
-      size: size.toString(),
-    });
+
+    // (1) GET CMS COLLECTIONS, filter for correct collections ("Programs" and "GROW Entries")
+
+    // PROGRAMS -
+    // (1) FOR EACH ITEM, POST-UPDATE "program-cta-external-url" FIELD TO mainCTALink val
+
+    // GROW -
+    // (1) GET THAT CMS COLLECTION'S SINGLE ITEM
+    // (2) CREATE scheduleURL LINK FROM ppsubdomain
+    // (2) POST-UPDATE COLLECTION ITEM "grow-schedule-form-id" WITH scheduleURL VAL
+
+    console.log("ppSubdomainInput:");
+    console.log(ppSubdomainInput);
+
+    console.log("mainCTALinkInput:");
+    console.log(mainCTALinkInput);
+
 
     try {
-      const response = await fetch(
-        `${BACKEND_URL}/api/images?${params.toString()}`,
+
+      console.log("GET:");
+      console.log(`${BACKEND_URL}/api/cms?siteId=${selectedSite?.id}&auth=${token}`);
+
+      const collectionsResponseObj = await fetch(
+        `${BACKEND_URL}/api/cms?siteId=${selectedSite?.id}&auth=${token}`,
         {
           method: "GET",
           headers: {
-            "Content-Type": "application/json",
+            "Content-Type": "application/json"
           },
+        }
+      ).then(res => res.json())
+      .then(data => {
+        setAllCollxns(data);
+        const cllxns = data.collections;
+        const programsCllxn = cllxns.filter((c: { slug: string | string[]; }) => c.slug.includes("programs"));
+        const programsCID = programsCllxn.map((c: { id: any; }) => c.id);
+        setProgramsCollxnID(programsCID);
+        const growEntriesCllxn = cllxns.filter((c: { slug: string | string[]; }) => c.slug.includes("grow-entries"));
+        const growEntriesCID = growEntriesCllxn.map((c: { id: any; }) => c.id);
+        setGrowEntriesCollxnID(growEntriesCID);
+        const faqsCllxn = cllxns.filter((c: { slug: string | string[]; }) => c.slug.includes("faqs"));
+        const faqsCID = faqsCllxn.map((c: { id: any; }) => c.id);
+        setFaqsCollxnID(faqsCID);
+        return {programsCID, growEntriesCID, faqsCID, cllxns};
+      });
+
+      console.log("collectionsResponseObj:");
+      console.log(collectionsResponseObj);
+
+      const {programsCID, growEntriesCID, faqsCID} = collectionsResponseObj;
+
+      // GET Grow Entries Item, update with new schedule URL
+
+      const getGrowEntriesItemsResponse = await fetch(
+        `${BACKEND_URL}/api/cms/items?collectionId=${growEntriesCID[0]}&auth=${token}`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json"
+          }
         }
       );
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      const growEntriesItem = await getGrowEntriesItemsResponse.json().then(data => {
+        console.log("items response:\n" + JSON.stringify(data));
+        return data.items[0];
+      });
+
+      const scheduleURL = ppSubdomainInput + "/open/calendar?framed=1";
+
+      const growEntriesUpdateRequestBody = {collectionId: growEntriesCID[0], auth: token, items: [{
+        "isArchived": false,
+        "isDraft": false,
+        "id": growEntriesItem.id,
+        "fieldData": {
+          "grow-schedule-form-id": scheduleURL,
+          "name": growEntriesItem.fieldData?.name,
+          "slug": growEntriesItem.fieldData?.slug
+        }
+      }]};
+
+      const growEntriesUpdateResponse = await fetch(
+        `${BACKEND_URL}/api/cms/items`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(growEntriesUpdateRequestBody)
+        }
+      );
+
+      growEntriesUpdateResponse.json().then(data => {
+        console.log(data);
+      });
+
+      if (!growEntriesUpdateResponse.ok) {
+        console.log(`HTTP error! status: ${growEntriesUpdateResponse.status}`);
       }
 
-      const data = await response.json();
-      if (data.images) {
-        setImages(data.images);
-        setPage(3);
+      // GET Main FAQS Item ID for reference in Programs
+      
+      const getFAQItemsResponse = await fetch(
+        `${BACKEND_URL}/api/cms/items?collectionId=${faqsCID[0]}&auth=${token}`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json"
+          }
+        }
+      );
+
+      const mainFaqsItem = await getFAQItemsResponse.json().then(data => {
+        console.log("items response:\n" + JSON.stringify(data));
+        const items = data.items;
+        return (items && items.length > 0) && items.filter((i: { fieldData: {slug: string} }) => i?.fieldData?.slug === "main-faqs")[0];
+      });
+      const mainFaqsItemId = mainFaqsItem?.id;
+
+      // GET PROGRAMS
+
+      const getProgramsItemsResponse = await fetch(
+        `${BACKEND_URL}/api/cms/items?collectionId=${programsCID[0]}&auth=${token}`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json"
+          }
+        }
+      )
+
+      const programsUpdateCalls: { itemId: any; fieldData: any; }[] = [];
+
+      await getProgramsItemsResponse.json().then(data => {
+        console.log("items response:\n" + JSON.stringify(data));
+        const items = data.items;
+
+        // required: subheading, description, cta-text, general-settings, name, slug
+
+        for (const item of items) {
+          const itemId = item?.id;
+          const fields = {
+                            "subheading": item?.fieldData?.subheadings,
+                            "description": item?.fieldData?.description,
+                            "cta-text": item?.fieldData['cta-text'],
+                            "general-settings": item?.fieldData['general-settings'],
+                            "name": item?.fieldData?.name,
+                            "slug": item?.fieldData?.slug,
+                            "program-cta-external-url": mainCTALinkInput,
+                            "faqs": mainFaqsItemId
+                          };
+          // fieldData['program-cta-external-url'] = mainCTALinkInput;
+          programsUpdateCalls.push({itemId, "fieldData": fields});
+        }
+
+        console.log("Programs Updates List:");
+        console.log(programsUpdateCalls);
+      });
+
+      const programsItems = [];
+
+      for (const update of programsUpdateCalls) {
+        const programRequest = {
+          id: update.itemId,
+          isArchived: false,
+          isDraft: false,
+          fieldData: update.fieldData
+        };
+        // console.log(programRequest);
+        programsItems.push(programRequest);
       }
+
+      const bulkProgramsRequestBody = {collectionId: programsCID[0], auth: token, items: programsItems};
+
+      const response = await fetch(
+        `${BACKEND_URL}/api/cms/items`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(bulkProgramsRequestBody)
+        }
+      );
+
+      response.json().then(data => {
+        console.log(data);
+      });
+
+      if (!response.ok) {
+        console.log(`HTTP error! status: ${response.status}`);
+      }
+
     } catch (error) {
       console.error("Error:", error);
     } finally {
@@ -186,220 +480,39 @@ const UserInput: React.FC<UserInputProps> = ({ setImages, token, setPage }) => {
     }
   };
 
+
   return (
     <div className="flex flex-col items-center justify-center py-2 px-2 bg-wf-gray text-wf-lightgray h-screen overflow-auto">
       <div className="text-center space-y-4 flex flex-col h-full justify-between pb-2">
-        <div>
+
+      <div>
           <h1 className="text-lg font-bold text-gray-200 mb-2 mt-2">
-            Describe your desired image
+            Input the Following to Update CMS:
           </h1>
+          <br/>
+          <h3>ppSubdomain:</h3>
           <textarea
-            className="bg-gray-700 rounded-md p-2 w-full h-32 -mb-2 resize-none"
-            placeholder="A busy coffee shop with people working on their laptops."
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
+            className="bg-gray-700 rounded-md p-2 w-full h-16 -mb-2 resize-none"
+            placeholder="subdomain"
+            value={ppSubdomainInput}
+            onChange={(e) => setPpSubdomainInputValue(e.target.value)}
           />
-        </div>
-        <div className="mb-2">
-          <p className="text-white mb-2">Image size: {size}</p>
-          <div className="flex justify-center w-full space-x-2">
-            {[256, 512, 1024].map((btnSize, i) => (
-              <button
-                key={i}
-                onClick={() => setSize(btnSize)}
-                className={`mb-2 rounded-md py-2 px-2 text-xs font-medium text-white ${
-                  size === btnSize ? "bg-blue-600" : "bg-gray-700"
-                } hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 cursor-pointer border-gray-700 w-full`}
-              >
-                {btnSize}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="mb-2">
-          <p className="text-white mb-2">Number of images: {n}</p>
-          <input
-            className="rounded-md bg-gray-700 w-full"
-            type="range"
-            min="1"
-            max="10"
-            value={n}
-            onChange={(e) => setN(parseInt(e.target.value))}
+          <br/>
+          <h3>mainCTALink for Programs:</h3>
+          <textarea
+            className="bg-gray-700 rounded-md p-2 w-full h-16 -mb-2 resize-none"
+            placeholder="subdomain"
+            value={mainCTALinkInput}
+            onChange={(e) => setMainCTALinkInputValue(e.target.value)}
           />
-        </div>
-        <div>
           <button
-            onClick={generateImages}
+            onClick={() => updateCMSVals()}
             className="rounded-md border border-transparent py-2 px-2 text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 cursor-pointer border-gray-700 w-full"
             disabled={isLoading}
           >
-            {isLoading ? "Generating..." : "Generate"}
+            {isLoading ? "Updating..." : "Update"}
           </button>
         </div>
-      </div>
-    </div>
-  );
-};
-
-const ImageOptions: React.FC<ImageOptionsProps> = ({
-  images,
-  resetUserInput,
-  selectedSite,
-  token,
-}) => {
-  const [page, setPage] = useState<number>(1);
-  const [addedImages, setAddedImages] = useState<number[]>([]);
-  const [selectedImage, setSelectedImage] = useState<SelectedImage | null>(
-    null
-  );
-  const imagesPerPage = 4;
-  const pageLength = Math.ceil(images.length / 4);
-  const [uploading, setUploading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const resetImageOptions = () => {
-    setPage(1);
-    setAddedImages([]);
-    setSelectedImage(null);
-    setUploading(false);
-    setError(null);
-  };
-
-  const navigateToImagePreview = (imgIndex: number, url: string) => {
-    setSelectedImage({ index: imgIndex, url: url });
-  };
-
-  const handleAddImage = async () => {
-    if (selectedImage && !addedImages.includes(selectedImage.index)) {
-      setUploading(true);
-      try {
-        if (!selectedSite) {
-          throw new Error("No site selected");
-        }
-        const response = await postImage(selectedImage.url, selectedSite.id);
-        if (response.error) {
-          throw new Error(response.error);
-        }
-        setAddedImages([...addedImages, selectedImage.index]);
-        setSelectedImage(null);
-        setError(null);
-      } catch (error: any) {
-        setError(error.message);
-      } finally {
-        setUploading(false);
-      }
-    }
-  };
-
-  async function postImage(imageURL: string, siteId: string) {
-    const response = await fetch(`${BACKEND_URL}/api/images`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ imageURL, siteId, auth: token }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data;
-  }
-
-  const currentPageImages = images.slice(
-    (page - 1) * imagesPerPage,
-    page * imagesPerPage
-  );
-
-  return (
-    <div className="flex flex-col items-center justify-center py-2 px-2 bg-wf-gray text-wf-lightgray h-screen overflow-auto space-y-4">
-      {!selectedImage ? (
-        <div className="text-center space-y-4 flex flex-col h-full pb-2">
-          <div>
-            <h1 className="text-lg font-bold text-gray-200 mb-2 mt-2">
-              Select Your Custom Images
-            </h1>
-          </div>
-          <div className="grid grid-cols-2 gap-2 justify-center mb-2">
-            {currentPageImages.map((img, i) => (
-              <div key={i} className="relative">
-                <button
-                  className="cursor-pointer"
-                  onClick={() => {
-                    const index = i + 1 + (page - 1) * 4;
-                    navigateToImagePreview(index, img.url);
-                  }}
-                  onKeyDown={(e) => {
-                    // Check if the key is -Enter-;
-                    if (e.key === "Enter") {
-                      const index = i + 1 + (page - 1) * 4;
-                      navigateToImagePreview(index, img.url);
-                    }
-                  }}
-                >
-                  <img
-                    src={img.url}
-                    alt=""
-                    width={128}
-                    height={128}
-                    className="object-cover rounded-md"
-                  />
-                </button>
-                {addedImages.includes(i + 1 + (page - 1) * 4) && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 rounded-md">
-                    <span className="text-white">Added!</span>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-          {pageLength > 1 && (
-            <div className="flex justify-between items-center w-full">
-              <button disabled={page === 1} onClick={() => setPage(page - 1)}>
-                Prev
-              </button>
-              <span>
-                Page {page} of {pageLength}
-              </span>
-              <button
-                disabled={page === pageLength}
-                onClick={() => setPage(page + 1)}
-              >
-                Next
-              </button>
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="flex flex-col items-center justify-center h-full overflow-auto space-y-4">
-          <img
-            src={selectedImage.url}
-            alt=""
-            width={256}
-            height={256}
-            className="object-cover rounded-md cursor-pointer"
-          />
-          <div className="flex justify-between items-center w-full">
-            <button onClick={() => setSelectedImage(null)}>Go Back</button>
-            <button onClick={handleAddImage} disabled={uploading}>
-              {uploading ? "Uploading..." : "Add"}
-            </button>
-          </div>
-          {error && <div>Error: {error}</div>}
-        </div>
-      )}
-      <div className="mt-4">
-        <button
-          className="group relative justify-center rounded-md border border-transparent bg-blue-600 py-2 px-2 text-xs font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 cursor-pointer border-gray-700 w-full"
-          onClick={() => {
-            resetImageOptions();
-            resetUserInput();
-          }}
-        >
-          Start Over
-        </button>
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
 {
-  "name": "devflow-party-ext",
-  "publicDir": "dist"
+  "name": "My Test Webflow App",
+  "publicDir": "dist",
+  "apiVersion": "2"
 }

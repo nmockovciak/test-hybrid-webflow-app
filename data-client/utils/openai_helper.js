@@ -1,10 +1,9 @@
-import { Configuration, OpenAIApi } from 'openai';
+import OpenAI from 'openai';
 
-const configuration = new Configuration({
-  apiKey: process.env.OPENAI_API_KEY,
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
 });
-
-const openai = new OpenAIApi(configuration);
 
 
 /**
@@ -90,7 +89,7 @@ const requestMetadataSuggestionsAndAnalysis = async (seoTitle, seoDescription, o
   }
   `
 
-  return await openai.createCompletion({
+  return await openai.completions.create({
     // model specifies the language model to use for generating the completion. In this case, "text-davinci-003" is used,
     // which is one of OpenAI's most advanced models capable of producing high-quality text with diverse styles and tones.
     model: "text-davinci-003",
@@ -129,7 +128,7 @@ export const generateImages = async (prompt, n, size, response_format) => {
     }
   };
 
-  return await openai.createImage({
+  return await openai.images.generate({
     prompt: prompt,
     n: n,
     size: getImageSize(size),
